@@ -1,0 +1,9 @@
+Debug
+Release
+*.o
+*.a
+*.exe
+*.d
+.DS_Store
+.settings
+
