@@ -24,6 +24,10 @@
  */
 
 #include "Renderer.h"
+#include "Camera.h"
+#include "Object.h"
+#include "Light.h"
+#include "Scene.h"
 
 #include "embree/common/accel.h"
 
@@ -31,88 +35,129 @@
 #include <numeric>
 #include <algorithm>
 
-using namespace Trayrace;
+namespace Trayrace {
 
-Renderer::Renderer(size_t width, size_t height) :
-        width(width), height(height) {
-}
-
-void Renderer::build(const std::vector<Object> &objects) {
-    using namespace embree;
-    using namespace std;
-    using namespace Eigen;
-
-    const size_t numVertices = accumulate(objects.begin(),
-            objects.end(),
-            size_t(0),
-            [&](size_t i, const Object &obj) {return i + obj.vertices_.size();});
-
-    const size_t numTriangles = accumulate(objects.begin(),
-            objects.end(),
-            size_t(0),
-            [&](size_t i, const Object &obj) {return i + obj.faces_.size();});
-
-    // allocate vertex memory with embree's allocator
-    BuildVertex * const vertices = (BuildVertex *) rtcMalloc(numVertices * sizeof(BuildVertex));
-    // allocate faces
-    BuildTriangle * const triangles = (BuildTriangle *) rtcMalloc(numTriangles * sizeof(BuildTriangle));
-    // give them to Object for converting geometry to embree format
-    size_t vertexOffset = 0, triangleOffset = 0;
-    for (const Object &obj : objects) {
-        obj.toEmbree(vertices + vertexOffset, triangles + triangleOffset);
-        vertexOffset += obj.vertices_.size();
-        triangleOffset += obj.faces_.size();
+Renderer::Renderer(size_t width, size_t height, size_t nThreads) :
+                width(width),
+                height(height),
+                nThreads(nThreads),
+                currentRow(0),
+                workersRunning(true),
+                workersComplete(0),
+                workersAwake(false),
+                scene(nullptr),
+                camera(nullptr),
+                pixels(nullptr) {
+    for (size_t i = 0; i < nThreads; i++) {
+        workers.emplace_back(&Renderer::renderThread, this);
     }
-
-    // create an accel structure
-    Ref<Accel> accel = rtcCreateAccel("bvh4.spatialsplit",
-            "triangle4i.pluecker",
-            triangles,
-            numTriangles,
-            vertices,
-            numVertices);
-    // get interface to accel
-    intersector = accel->queryInterface<Intersector>();
 }
 
-void Renderer::draw(std::vector<PixelToaster::Pixel> &pixels) {
-    using namespace PixelToaster;
-    using namespace embree;
-    using namespace Eigen;
-
-    const Pixel black(0.f, 0.f, 0.f);
-    const Pixel white(1.f, 1.f, 1.f);
-
-    // rays origin
-    const Vec3f origin(278.f, 273.f, -800.f);
-
-    const double start = timer.time();
-    for (size_t j = 0; j < height; ++j) {
-        for (size_t i = 0; i < width; ++i) {
-            const size_t index = j * width + i;
-
-            // scale screen coordinates to render coordinates on the xy-plane
-            const float x = 556.f * float(i) / width;
-            const float y = -548.8f * float(j) / height + 548.8f;
-
-            embree::Vec3f dir(x - origin.x, y - origin.y, 0.f - origin.z);
-            embree::Ray ray(origin, dir);
-            embree::Hit hit;
-            // trace a ray and write pixel
-            intersector->intersect(ray, hit);
-            if (hit) {
-                MaterialLib::Material *mat = (MaterialLib::Material *) (uintptr_t(hit.id0) + (uintptr_t(hit.id1) << 32));
-                if (mat != nullptr) {
-                    Vector3f &c = mat->diffuseColor;
-//                    cout << mat << endl;
-//                    cout << &c << endl;
-                    pixels[index] = (Pixel &)(c);
-                }
-            } else {
-                pixels[index] = black;
-            }
+Renderer::~Renderer() {
+    workersRunning = false;
+    // wake the threads so they return
+    workersAwake = true;
+    workersCondVar.notify_all();
+    for (std::thread &t: workers) {
+        if (t.joinable()) {
+            t.join();
         }
     }
-    const double end = timer.time();
-    std::cout << "Frame rendered in " << (end - start) * 1000.0 << "ms." << std::endl;
+}
+
+Color Renderer::shade(const Vector3f &n, const Vector3f &wi) {
+    const float c = std::max(0.f, n.dot(wi));
+    return Color(c, c, c);
+}
+
+void Renderer::start(const Scene &scene, const Camera &camera, std::vector<Pixel> &pixels) {
+    using namespace std;
+    using namespace std::chrono;
+
+    renderStartTime = high_resolution_clock::now();
+
+    this->scene = &scene;
+    this->camera = &camera;
+    this->pixels = &pixels;
+    currentRow = 0;
+    workersComplete = 0;
+    workersAwake = true;
+    workersCondVar.notify_all();
+}
+
+void Renderer::renderThread() {
+    using namespace std;
+    using namespace std::chrono;
+
+    while (workersRunning) {
+        unique_lock<mutex> lock(workersMutex);
+        while (!workersAwake) {
+            workersCondVar.wait_for(lock, milliseconds(500));
+        }
+        lock.unlock();
+        if (!workersRunning) {
+            return;
+        }
+
+        Light::VisibilityTester visibilityTester;
+
+        for (size_t j = currentRow++; j < height; j = currentRow++) {
+            for (size_t i = 0; i < width; i++) {
+                const size_t index = j * width + i;
+
+                Ray ray = camera->generateRay(i, j);
+                Hit hit;
+                // trace a ray and write pixel
+                scene->intersect(ray, hit);
+                if (hit) {
+                    const Object &obj = *scene->objects[hit.id0];
+                    const Object::Face &face = obj.faces[hit.id1];
+
+                    const auto &v0 = obj.vertices[face.vertexIdxs[0]];
+                    const auto &v1 = obj.vertices[face.vertexIdxs[1]];
+                    const auto &v2 = obj.vertices[face.vertexIdxs[2]];
+
+                    const auto &ns0 = obj.normals[face.normalIdxs[0]];
+                    const auto &ns1 = obj.normals[face.normalIdxs[1]];
+                    const auto &ns2 = obj.normals[face.normalIdxs[2]];
+
+                    const auto &e1 = v1 - v0;
+                    const auto &e2 = v2 - v0;
+                    const auto &ng = e1.cross(e2).normalized();
+
+                    const auto &sp = BaryLerp(v0, v1, v2, hit.u, hit.v);
+                    const auto &ns = BaryLerp(ns0, ns1, ns2, hit.u, hit.v).normalized();
+
+                    Color c(0.f, 0.f, 0.f);
+                    Vector3f wi;
+                    for (auto lightPtr : scene->lights) {
+                        const Light &light = *lightPtr;
+                        float weight = 1.f / light.nSamples;
+                        for (size_t i = 0; i < light.nSamples; i++) {
+                            const Color lColor = light.sample(sp, EPS, wi, visibilityTester);
+                            if (ng.dot(wi) > 0.f && visibilityTester.unoccluded(*scene)) {
+                                c += Color(shade(ns, wi).array() * (lColor * weight).array());
+                            }
+                        }
+                    }
+
+                    (*pixels)[index] = Pixel(c.x(), c.y(), c.z());
+//                    (*pixels)[index] = Pixel(1.f - hit.u - hit.v, hit.u, hit.v);
+//                    (*pixels)[index] = Pixel(ng.x() * .5f + .5f, ng.y() * .5f + .5f, ng.z() * .5f + .5f);
+                } else {
+                    (*pixels)[index] = Pixel(0.f, 0.f, 0.f);
+                }
+            }
+        }
+
+        // the thread that finishes first sleeps all others
+        workersAwake = false;
+
+        if (++workersComplete == nThreads) {
+            const time_point end = high_resolution_clock::now();
+            cout << "Frame rendered in " << DurationStr(renderStartTime, end) << "." << endl;
+        }
+    }
+}
+
 }

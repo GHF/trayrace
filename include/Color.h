@@ -23,55 +23,34 @@
  *  in this Software without prior written authorization from Xo Wang.
  */
 
-#ifndef OBJECT_H_
-#define OBJECT_H_
+#ifndef COLOR_H_
+#define COLOR_H_
 
 #include "Trayrace.h"
-#include "Transform.h"
-#include "MaterialLib.h"
+#include "PixelToaster/PixelToaster.h"
 
-#include "embree/common/accel.h"
-
-#include <string>
-#include <vector>
-
-#include <stdint.h>
+#include <ostream>
 
 namespace Trayrace {
 
-class Object {
+class Color: public Vector4f {
 public:
-    typedef int32_t IndexT;
+    Color() {
+    }
 
-    struct Face {
-        IndexT vertexIdxs[4];
-        IndexT texcoordIdxs[4];
-        IndexT normalIdxs[4];
-        bool isQuad;
-        const MaterialLib::Material *mat;
-    };
+    Color(float r, float g, float b, float a = 1.f) {
+        *this << r, g, b, a;
+    }
 
-    const std::string path;
-    std::vector<Vector3f> vertices;
-    std::vector<Vector2f> texcoords;
-    std::vector<Vector3f> normals;
-    std::vector<Face> faces;
+    Color(const Vector4f &v) :
+            Vector4f(v) {
+    }
 
-    Object(const std::string &path);
-    virtual ~Object();
-
-    void toEmbree(const int id0,
-            embree::BuildVertex * const vertices,
-            const size_t vertexOffset,
-            embree::BuildTriangle * const triangles,
-            const size_t triangleOffset) const;
-
-    void transformBy(const Transform &transform);
-
-protected:
-    bool loadFile(const std::string &path);
+//    friend std::ostream &operator<<(std::ostream &os, const Color &c) {
+//        return os <<
+//    }
 };
 
 }
 
-#endif /* OBJECT_H_ */
+#endif /* COLOR_H_ */

@@ -23,55 +23,24 @@
  *  in this Software without prior written authorization from Xo Wang.
  */
 
-#ifndef OBJECT_H_
-#define OBJECT_H_
-
-#include "Trayrace.h"
-#include "Transform.h"
-#include "MaterialLib.h"
-
-#include "embree/common/accel.h"
-
-#include <string>
-#include <vector>
-
-#include <stdint.h>
+#include "PointLight.h"
 
 namespace Trayrace {
 
-class Object {
-public:
-    typedef int32_t IndexT;
-
-    struct Face {
-        IndexT vertexIdxs[4];
-        IndexT texcoordIdxs[4];
-        IndexT normalIdxs[4];
-        bool isQuad;
-        const MaterialLib::Material *mat;
-    };
-
-    const std::string path;
-    std::vector<Vector3f> vertices;
-    std::vector<Vector2f> texcoords;
-    std::vector<Vector3f> normals;
-    std::vector<Face> faces;
-
-    Object(const std::string &path);
-    virtual ~Object();
-
-    void toEmbree(const int id0,
-            embree::BuildVertex * const vertices,
-            const size_t vertexOffset,
-            embree::BuildTriangle * const triangles,
-            const size_t triangleOffset) const;
-
-    void transformBy(const Transform &transform);
-
-protected:
-    bool loadFile(const std::string &path);
-};
-
+PointLight::PointLight(const Transform &lightToWorld, const Color &intensity) :
+        Light(lightToWorld),
+        position(lightToWorld * Vector3f(0.f, 0.f, 0.f)),
+        intensity(intensity) {
 }
 
-#endif /* OBJECT_H_ */
+Color PointLight::sample(const Vector3f &p, float pEps, Vector3f &wi, Light::VisibilityTester &vis) const {
+    wi = (position - p).normalized();
+    vis.setSegment(p, pEps, position, 0.f);
+    return Color(intensity / (position - p).squaredNorm());
+}
+
+Color PointLight::power(const Scene &scene) const {
+    return Color(4.f * float(M_PI) * intensity);
+}
+
+}

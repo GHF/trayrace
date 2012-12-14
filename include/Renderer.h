@@ -26,29 +26,63 @@
 #ifndef RENDERER_H_
 #define RENDERER_H_
 
-#include "Object.h"
+#include "Trayrace.h"
+#include "Color.h"
 
-#include "PixelToaster/PixelToaster.h"
-#include "embree/common/intersector.h"
-
+#include <mutex>
+#include <atomic>
+#include <thread>
 #include <vector>
+#include <condition_variable>
 
 namespace Trayrace {
 
+class Camera;
+class Scene;
+
 class Renderer {
 public:
-    Renderer(size_t width, size_t height);
+    Renderer(size_t width, size_t height, size_t nThreads);
 
-    void draw(std::vector<PixelToaster::Pixel> &pixels);
+    ~Renderer();
 
-    void build(const std::vector<Object> &objects);
+    void start(const Scene &scene, const Camera &camera, std::vector<Pixel> &pixels);
+
+    bool started() const {
+        return workersAwake;
+    }
+
+    bool done() const {
+        return workersComplete == nThreads;
+    }
 
 protected:
     const size_t width;
     const size_t height;
+    const size_t nThreads;
 
-    embree::Ref<embree::Intersector> intersector;
-    PixelToaster::Timer timer;
+    std::atomic_size_t currentRow;
+    time_point renderStartTime;
+
+    // todo: this should be std::atomic_bool but libc++ doesn't have it
+    std::atomic<bool> workersRunning;
+    std::vector<std::thread> workers;
+
+    // number of workers done rendering
+    std::atomic_size_t workersComplete;
+
+    // controls worker run/stop
+    std::atomic<bool> workersAwake;
+    std::mutex workersMutex;
+    std::condition_variable workersCondVar;
+
+    const Scene * volatile scene;
+    const Camera * volatile camera;
+    std::vector<Pixel> * volatile pixels;
+
+    inline Color shade(const Vector3f &n, const Vector3f &wi);
+
+    void renderThread();
 };
 
 }

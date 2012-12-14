@@ -32,9 +32,12 @@
 #include <iterator>
 #include <algorithm>
 
-using namespace Trayrace;
+#include <cstdlib>
 
-Object::Object(const std::string &path) {
+namespace Trayrace {
+
+Object::Object(const std::string &path) :
+        path(path) {
     loadFile(path);
 }
 
@@ -42,39 +45,59 @@ Object::~Object() {
 }
 
 static Object::IndexT indexFromStr(const std::string &s, const size_t currentIdx) {
-    const Object::IndexT t = fromString<Object::IndexT>(s);
+    const Object::IndexT t = FromString<Object::IndexT>(s);
     if (t < 0) {
         return currentIdx + t + 1;
     }
     return t;
 }
 
-void Object::toEmbree(embree::BuildVertex *vertices, embree::BuildTriangle *triangles) const {
+void Object::toEmbree(
+        const int id0,
+        embree::BuildVertex * const vertices,
+        const size_t vertexOffset,
+        embree::BuildTriangle * const triangles,
+        const size_t triangleOffset) const {
     using namespace embree;
-    using namespace Eigen;
-    for (size_t i = 0; i < vertices_.size(); i++) {
-        const Vector3f &v = vertices_[i];
+    for (size_t i = 0; i < this->vertices.size(); i++) {
+        const Vector3f &v = this->vertices[i];
         // construct embree vertices in place
-        new (&vertices[i]) BuildVertex(v[0], v[1], v[2]);
+        new (&vertices[i + vertexOffset]) BuildVertex(v[0], v[1], v[2]);
     }
-    for (size_t i = 0; i < faces_.size(); i++) {
-        const Face &f = faces_[i];
+    for (size_t i = 0; i < faces.size(); i++) {
+        const Face &f = faces[i];
         // construct triangles
-        new (&triangles[i]) BuildTriangle(f.vertexIdxs[0] - 1,
-                f.vertexIdxs[1] - 1,
-                f.vertexIdxs[2] - 1,
-                uintptr_t(f.mat),
-                uintptr_t(f.mat) >> 32);
+        new (&triangles[i + triangleOffset]) BuildTriangle(f.vertexIdxs[0] + vertexOffset,
+                f.vertexIdxs[1] + vertexOffset,
+                f.vertexIdxs[2] + vertexOffset,
+                id0,
+                i);
+    }
+}
+
+void Object::transformBy(const Transform &transform) {
+    for (Vector3f &v : vertices) {
+        v = transform * v;
+    }
+    const Transform normalTransform(transform.inverse().transpose());
+    for (Vector3f &vn : normals) {
+        vn = normalTransform * vn;
     }
 }
 
 bool Object::loadFile(const std::string &path) {
     using namespace std;
+    using namespace std::chrono;
+
+    const time_point loadStartTime = high_resolution_clock::now();
+
     ifstream ifs(path.c_str(), ifstream::in);
     if (!ifs.is_open()) {
+        std::cerr << "File \"" << path << "\" could not be loaded." << std::endl;
         return false;
     }
 
+    BoundBox boundBox;
     string line;
     vector<string> tokens;
     string mtlPath;
@@ -92,26 +115,27 @@ bool Object::loadFile(const std::string &path) {
                 cerr << path << ": Vertex command does not have correct number of components\n";
                 continue;
             }
-            const Eigen::Vector3f vertex(fromString<float>(tokens[1]),
-                    fromString<float>(tokens[2]),
-                    fromString<float>(tokens[3]));
-            vertices_.push_back(vertex);
+            const Vector3f vertex(FromString<float>(tokens[1]),
+                    FromString<float>(tokens[2]),
+                    FromString<float>(tokens[3]));
+            boundBox.extend(vertex);
+            vertices.push_back(vertex);
         } else if (tokens[0] == "vt") {
             if (tokens.size() != 3) {
                 cerr << path << ": Texture coordinate command does not have correct number of components\n";
                 continue;
             }
-            const Eigen::Vector2f texcoord(fromString<float>(tokens[1]), fromString<float>(tokens[2]));
-            texcoords_.push_back(texcoord);
+            const Vector2f texcoord(FromString<float>(tokens[1]), FromString<float>(tokens[2]));
+            texcoords.push_back(texcoord);
         } else if (tokens[0] == "vn") {
             if (tokens.size() != 4) {
                 cerr << path << ": Normal command does not have correct number of components\n";
                 continue;
             }
-            const Eigen::Vector3f normal(fromString<float>(tokens[1]),
-                    fromString<float>(tokens[2]),
-                    fromString<float>(tokens[3]));
-            normals_.push_back(normal);
+            const Vector3f normal(FromString<float>(tokens[1]),
+                    FromString<float>(tokens[2]),
+                    FromString<float>(tokens[3]));
+            normals.push_back(normal);
         } else if (tokens[0] == "f") {
             Face face = { };
             if (tokens.size() != 4 && tokens.size() != 5) {
@@ -125,9 +149,9 @@ bool Object::loadFile(const std::string &path) {
             switch (slashesCount) {
             case 0: {
                 for (size_t i = 0; i < 3U + face.isQuad; i++) {
-                    face.vertexIdxs[i] = indexFromStr(tokens[i + 1], vertices_.size());
+                    face.vertexIdxs[i] = indexFromStr(tokens[i + 1], vertices.size()) - 1;
                 }
-                faces_.push_back(face);
+                faces.push_back(face);
                 break;
             }
 
@@ -135,11 +159,11 @@ bool Object::loadFile(const std::string &path) {
                 for (size_t i = 0; i < 3U + face.isQuad; i++) {
                     const std::string &token = tokens[i + 1];
                     const size_t slashPos = token.find('/');
-                    face.vertexIdxs[i] = indexFromStr(token.substr(0, slashPos), vertices_.size());
+                    face.vertexIdxs[i] = indexFromStr(token.substr(0, slashPos), vertices.size()) - 1;
                     if (token.size() - slashPos > 1)
-                        face.texcoordIdxs[i] = indexFromStr(token.substr(slashPos + 1), texcoords_.size());
+                        face.texcoordIdxs[i] = indexFromStr(token.substr(slashPos + 1), texcoords.size()) - 1;
                 }
-                faces_.push_back(face);
+                faces.push_back(face);
                 break;
             }
 
@@ -148,14 +172,14 @@ bool Object::loadFile(const std::string &path) {
                     const std::string &token = tokens[i + 1];
                     const size_t slash0Pos = token.find('/');
                     const size_t slash1Pos = token.find('/', slash0Pos + 1);
-                    face.vertexIdxs[i] = indexFromStr(token.substr(0, slash0Pos), vertices_.size());
+                    face.vertexIdxs[i] = indexFromStr(token.substr(0, slash0Pos), vertices.size()) - 1;
                     if (slash1Pos - slash0Pos > 1)
                         face.texcoordIdxs[i] = indexFromStr(token.substr(slash0Pos + 1, slash1Pos - slash0Pos),
-                                texcoords_.size());
+                                texcoords.size()) - 1;
                     if (token.size() - slash0Pos > 1)
-                        face.normalIdxs[i] = indexFromStr(token.substr(slash1Pos + 1), normals_.size());
+                        face.normalIdxs[i] = indexFromStr(token.substr(slash1Pos + 1), normals.size()) - 1;
                 }
-                faces_.push_back(face);
+                faces.push_back(face);
                 break;
             }
 
@@ -181,5 +205,26 @@ bool Object::loadFile(const std::string &path) {
     }
     ifs.close();
 
+    const time_point loadEndTime = high_resolution_clock::now();
+    cout
+            << "File \""
+            << path
+            << "\" loaded in "
+            << DurationStr(loadStartTime, loadEndTime)
+            << " with "
+            << faces.size()
+            << " face(s), "
+            << normals.size()
+            << " normal(s), and "
+            << texcoords.size()
+            << " texture coordinate(s).\n"
+            << "\tBounding box: {"
+            << boundBox.min().transpose()
+            << ", "
+            << boundBox.max().transpose()
+            << "}\n";
+
     return true;
+}
+
 }

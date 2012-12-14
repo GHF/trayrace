@@ -26,7 +26,7 @@
 #ifndef MATERIALLIB_H_
 #define MATERIALLIB_H_
 
-#include "Eigen/Dense"
+#include "Trayrace.h"
 
 #include <map>
 #include <string>
@@ -37,13 +37,16 @@ class MaterialLib {
 public:
     friend class Renderer;
     struct Material {
-        Eigen::Vector3f ambientColor;
-        Eigen::Vector3f diffuseColor;
-        Eigen::Vector3f specularColor;
+        Vector3f ambientColor;
+        Vector3f diffuseColor;
+        Vector3f specularColor;
         float alpha;
 
         Material() :
-                ambientColor(), diffuseColor(), specularColor(), alpha() {
+                ambientColor(.1f, .1f, .1f),
+                diffuseColor(.6f, .6f, .6f),
+                specularColor(.9f, .9f, .9f),
+                alpha(1.f) {
         }
     };
 

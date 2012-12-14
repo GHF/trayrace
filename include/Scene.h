@@ -23,55 +23,43 @@
  *  in this Software without prior written authorization from Xo Wang.
  */
 
-#ifndef OBJECT_H_
-#define OBJECT_H_
+#ifndef SCENE_H_
+#define SCENE_H_
 
 #include "Trayrace.h"
-#include "Transform.h"
-#include "MaterialLib.h"
 
-#include "embree/common/accel.h"
+#include "embree/common/intersector.h"
 
-#include <string>
 #include <vector>
-
-#include <stdint.h>
+#include <memory>
 
 namespace Trayrace {
 
-class Object {
+class Light;
+class Object;
+
+class Scene {
 public:
-    typedef int32_t IndexT;
+    friend class Renderer;
 
-    struct Face {
-        IndexT vertexIdxs[4];
-        IndexT texcoordIdxs[4];
-        IndexT normalIdxs[4];
-        bool isQuad;
-        const MaterialLib::Material *mat;
-    };
+    Scene();
 
-    const std::string path;
-    std::vector<Vector3f> vertices;
-    std::vector<Vector2f> texcoords;
-    std::vector<Vector3f> normals;
-    std::vector<Face> faces;
+    void build(const std::vector<std::shared_ptr<Object>> &objects, const std::vector<std::shared_ptr<Light>> &lights);
 
-    Object(const std::string &path);
-    virtual ~Object();
+    void intersect(const Ray& ray, Hit& hit) const {
+        intersector->intersect(ray, hit);
+    }
 
-    void toEmbree(const int id0,
-            embree::BuildVertex * const vertices,
-            const size_t vertexOffset,
-            embree::BuildTriangle * const triangles,
-            const size_t triangleOffset) const;
-
-    void transformBy(const Transform &transform);
+    bool occluded(const Ray& ray) const {
+        return intersector->occluded(ray);
+    }
 
 protected:
-    bool loadFile(const std::string &path);
+    embree::Ref<embree::Intersector> intersector;
+    std::vector<std::shared_ptr<Object>> objects;
+    std::vector<std::shared_ptr<Light>> lights;
 };
 
 }
 
-#endif /* OBJECT_H_ */
+#endif /* SCENE_H_ */

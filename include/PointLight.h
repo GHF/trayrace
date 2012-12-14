@@ -23,55 +23,40 @@
  *  in this Software without prior written authorization from Xo Wang.
  */
 
-#ifndef OBJECT_H_
-#define OBJECT_H_
+#ifndef POINTLIGHT_H_
+#define POINTLIGHT_H_
 
-#include "Trayrace.h"
-#include "Transform.h"
-#include "MaterialLib.h"
+#include "Light.h"
 
-#include "embree/common/accel.h"
-
-#include <string>
-#include <vector>
-
-#include <stdint.h>
+#include <ostream>
 
 namespace Trayrace {
 
-class Object {
+class PointLight: public Light {
 public:
-    typedef int32_t IndexT;
+    PointLight(const Transform &lightToWorld, const Color &intensity);
 
-    struct Face {
-        IndexT vertexIdxs[4];
-        IndexT texcoordIdxs[4];
-        IndexT normalIdxs[4];
-        bool isQuad;
-        const MaterialLib::Material *mat;
-    };
+    Color sample(const Vector3f &p, float pEps, Vector3f &wi, Light::VisibilityTester &vis) const;
 
-    const std::string path;
-    std::vector<Vector3f> vertices;
-    std::vector<Vector2f> texcoords;
-    std::vector<Vector3f> normals;
-    std::vector<Face> faces;
+    Color power(const Scene &scene) const;
 
-    Object(const std::string &path);
-    virtual ~Object();
+    bool isDeltaLight() const {
+        return true;
+    }
 
-    void toEmbree(const int id0,
-            embree::BuildVertex * const vertices,
-            const size_t vertexOffset,
-            embree::BuildTriangle * const triangles,
-            const size_t triangleOffset) const;
-
-    void transformBy(const Transform &transform);
+    friend std::ostream &operator<<(std::ostream &os, const PointLight &pl) {
+        return os << "PointLight { " << (Light &) pl << ", position = "
+                << pl.position.transpose()
+                << ", intensity = "
+                << pl.intensity.transpose()
+                << " }";
+    }
 
 protected:
-    bool loadFile(const std::string &path);
+    Vector3f position;
+    Color intensity;
 };
 
 }
 
-#endif /* OBJECT_H_ */
+#endif /* POINTLIGHT_H_ */

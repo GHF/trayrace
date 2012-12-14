@@ -23,12 +23,22 @@
  *  in this Software without prior written authorization from Xo Wang.
  */
 
-#include "Renderer.h"
 #include "Object.h"
+#include "Renderer.h"
+#include "Transform.h"
+#include "PointLight.h"
+#include "AreaDiskLight.h"
+#include "InteractiveCamera.h"
+
 #include "PixelToaster/PixelToaster.h"
 
 #include <iostream>
+#include <memory>
 #include <vector>
+
+#include <random>
+#include <thread>
+#include <chrono>
 
 #include <cstdlib>
 
@@ -37,19 +47,62 @@ int main(const int argc, const char * const argv[]) {
     using namespace PixelToaster;
     using namespace std;
 
+    if (argc < 2) {
+        cerr << "Usage: " << argv[0] << " <OBJ path>" << endl;
+        return EXIT_FAILURE;
+    }
+
     const size_t width = 1024;
     const size_t height = 1024;
 
-    vector<Object> objects;
-    objects.emplace_back("cornell_box.obj");
+//    Transform look = Transform::LookAt(Vector3f(5, 2, 0), Vector3f(0, 0, 0), Vector3f(0, 1, 0));
+    InteractiveCamera camera(width, height, {-.5f, .5f, -.5f, .5f}, 30.f * float(M_PI / 180.0));
+    camera.theta = 10.f * float(M_PI / 180.0);
+    camera.phi = M_PI_2;
+    camera.r = 5.5f;
+    camera.recompute();
+
+    vector<shared_ptr<Object>> objects;
+    for (size_t i = 1; i < argc; i++) {
+        Object *obj = new Object(argv[i]);
+        if (!obj->faces.empty()) {
+            objects.emplace_back(obj);
+        } else {
+            delete obj;
+        }
+    }
+
+    vector<shared_ptr<Light>> lights;
+//    lights.emplace_back(new PointLight(Transform::Translate(2, 1.5, -2), Color(6, 6, 5.9)));
+//    lights.emplace_back(new PointLight(Transform::Translate(-1, 2.5, 2), Color(5, 5, 5.1)));
+    lights.emplace_back(
+        new AreaDiskLight(
+            Transform::LookAt(Vector3f(1, 2, 3), Vector3f(0, 0, 0), Vector3f(0, 1, 0)),
+            128,
+            Color(12, 12, 12),
+            1.f,
+            0.f));
+    lights.emplace_back(
+        new AreaDiskLight(
+            Transform::LookAt(Vector3f(1, 2, -3), Vector3f(0, 0, 0), Vector3f(0, 1, 0)),
+            128,
+            Color(12, 12, 12),
+            1.f,
+            0.f));
 
     Display display("Trayrace", width, height);
-    Renderer renderer(width, height);
-    renderer.build(objects);
+    Scene scene;
     vector<Pixel> pixels(width * height);
+    Renderer renderer(width, height, thread::hardware_concurrency());
 
+    scene.build(objects, lights);
+    renderer.start(scene, camera, pixels);
+    display.listener(&camera);
     while (display.open()) {
-        renderer.draw(pixels);
+        if (renderer.done()) {
+            renderer.start(scene, camera, pixels);
+        }
+        this_thread::sleep_for(chrono::nanoseconds(1000000000 / 20));
         display.update(pixels);
     }
 

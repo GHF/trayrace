@@ -31,7 +31,7 @@
 #include <fstream>
 #include <iostream>
 
-using namespace Trayrace;
+namespace Trayrace {
 
 MaterialLib::FileToNameToMaterial_t MaterialLib::fileToNameToMtl;
 
@@ -83,22 +83,24 @@ bool MaterialLib::parseFile(const std::string &path) {
             cerr << path << ": Assigning material properties without a preceding \"newmtl\"\n";
             continue;
         } else if (tokens[0] == "Ka") {
-            mtl->ambientColor = Eigen::Vector3f(fromString<float>(tokens[1]),
-                    fromString<float>(tokens[2]),
-                    fromString<float>(tokens[3]));
+            mtl->ambientColor = Vector3f(FromString<float>(tokens[1]),
+                    FromString<float>(tokens[2]),
+                    FromString<float>(tokens[3]));
         } else if (tokens[0] == "Kd") {
-            mtl->diffuseColor = Eigen::Vector3f(fromString<float>(tokens[1]),
-                    fromString<float>(tokens[2]),
-                    fromString<float>(tokens[3]));
+            mtl->diffuseColor = Vector3f(FromString<float>(tokens[1]),
+                    FromString<float>(tokens[2]),
+                    FromString<float>(tokens[3]));
         } else if (tokens[0] == "Ks") {
-            mtl->specularColor = Eigen::Vector3f(fromString<float>(tokens[1]),
-                    fromString<float>(tokens[2]),
-                    fromString<float>(tokens[3]));
+            mtl->specularColor = Vector3f(FromString<float>(tokens[1]),
+                    FromString<float>(tokens[2]),
+                    FromString<float>(tokens[3]));
         } else if (tokens[0] == "d") {
-            mtl->alpha = fromString<float>(tokens[1]);
+            mtl->alpha = FromString<float>(tokens[1]);
         }
     }
     ifs.close();
 
     return true;
+}
+
 }

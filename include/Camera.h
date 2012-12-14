@@ -23,55 +23,47 @@
  *  in this Software without prior written authorization from Xo Wang.
  */
 
-#ifndef OBJECT_H_
-#define OBJECT_H_
+#ifndef CAMERA_H_
+#define CAMERA_H_
 
-#include "Trayrace.h"
 #include "Transform.h"
-#include "MaterialLib.h"
-
-#include "embree/common/accel.h"
-
-#include <string>
-#include <vector>
-
-#include <stdint.h>
 
 namespace Trayrace {
 
-class Object {
+class Camera {
 public:
-    typedef int32_t IndexT;
+    Transform cameraToWorld;
 
-    struct Face {
-        IndexT vertexIdxs[4];
-        IndexT texcoordIdxs[4];
-        IndexT normalIdxs[4];
-        bool isQuad;
-        const MaterialLib::Material *mat;
-    };
+    Camera(const Transform &cameraToWorld, size_t xRes, size_t yRes, const float (&screenWindow)[4], float fov) :
+            cameraToWorld(cameraToWorld) {
+        // screen space to raster space transform
+        screenToRaster = Transform::Scale(xRes, yRes, 1.f)
+                * Transform::Scale(
+                    1.f / (screenWindow[1] - screenWindow[0]),
+                    1.f / (screenWindow[2] - screenWindow[3]),
+                    1.f)
+                * Transform::Translate(-screenWindow[0], -screenWindow[3], 0.f);
+        rasterToScreen = screenToRaster.inverse();
 
-    const std::string path;
-    std::vector<Vector3f> vertices;
-    std::vector<Vector2f> texcoords;
-    std::vector<Vector3f> normals;
-    std::vector<Face> faces;
+        // projective camera transform: specifically for perspective
+        cameraToScreen = Transform::Perspective(fov, 1e-2f, 1000.f);
+        rasterToCamera = cameraToScreen.inverse() * rasterToScreen;
+    }
 
-    Object(const std::string &path);
-    virtual ~Object();
-
-    void toEmbree(const int id0,
-            embree::BuildVertex * const vertices,
-            const size_t vertexOffset,
-            embree::BuildTriangle * const triangles,
-            const size_t triangleOffset) const;
-
-    void transformBy(const Transform &transform);
+    Ray generateRay(size_t imageX, size_t imageY) const {
+        using namespace embree;
+        const auto pCam = (rasterToCamera * Vector3f(imageX, imageY, 0.f)).normalized();
+        Ray ray(Vec3f(0.f), Vec3f(pCam.x(), pCam.y(), pCam.z()));
+        return cameraToWorld * ray;
+    }
 
 protected:
-    bool loadFile(const std::string &path);
+    Transform cameraToScreen;
+    Transform rasterToCamera;
+    Transform screenToRaster;
+    Transform rasterToScreen;
 };
 
 }
 
-#endif /* OBJECT_H_ */
+#endif /* CAMERA_H_ */

@@ -23,55 +23,55 @@
  *  in this Software without prior written authorization from Xo Wang.
  */
 
-#ifndef OBJECT_H_
-#define OBJECT_H_
+#ifndef AREADISKLIGHT_H_
+#define AREADISKLIGHT_H_
 
-#include "Trayrace.h"
-#include "Transform.h"
-#include "MaterialLib.h"
-
-#include "embree/common/accel.h"
-
-#include <string>
-#include <vector>
-
-#include <stdint.h>
+#include "Light.h"
 
 namespace Trayrace {
 
-class Object {
+class AreaDiskLight: public Light {
 public:
-    typedef int32_t IndexT;
+    Color le;
+    float radius;
+    float height;
 
-    struct Face {
-        IndexT vertexIdxs[4];
-        IndexT texcoordIdxs[4];
-        IndexT normalIdxs[4];
-        bool isQuad;
-        const MaterialLib::Material *mat;
-    };
+    AreaDiskLight(const Transform &lightToWorld, size_t nSamples, const Color &le, float radius, float height);
 
-    const std::string path;
-    std::vector<Vector3f> vertices;
-    std::vector<Vector2f> texcoords;
-    std::vector<Vector3f> normals;
-    std::vector<Face> faces;
+    Color sample(const Vector3f &p, float pEps, Vector3f &wi, Light::VisibilityTester &vis) const;
 
-    Object(const std::string &path);
-    virtual ~Object();
+    Color power(const Scene &scene) const;
 
-    void toEmbree(const int id0,
-            embree::BuildVertex * const vertices,
-            const size_t vertexOffset,
-            embree::BuildTriangle * const triangles,
-            const size_t triangleOffset) const;
+    bool isDeltaLight() const {
+        return false;
+    }
 
-    void transformBy(const Transform &transform);
+    Vector3f sample(float u1, float u2, Vector3f &ns) const;
 
-protected:
-    bool loadFile(const std::string &path);
+    // todo: this should be shading point and light w_i, not light point
+    float pdf(const Vector3f &p, const Vector3f &lp) const {
+        // todo
+        return 1.f;
+    }
+
+    bool intersect(const Ray &ray, float &tHit, float &rayEpsilon) const {
+        // todo
+        return false;
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const AreaDiskLight &dl) {
+        return os << "AreaDiskLight { "
+                << (Light &) dl
+                << ", intensity = "
+                << dl.le.transpose()
+                << ", radius = "
+                << dl.radius
+                << ", height = "
+                << dl.height
+                << " }";
+    }
 };
 
 }
 
-#endif /* OBJECT_H_ */
+#endif /* AREADISKLIGHT_H_ */
